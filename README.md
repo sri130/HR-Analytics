@@ -9,6 +9,7 @@ Hence, the objectives of the above analysis is to:
 Help company XYZ identify current employees that are very likely to leave
 Recommend ways for company XYZ to decrease its attrition level in the future.
 
+## Modelling
 A total of 24 variables present in the dataset were used to predict the probability of an employee leaving the company in the next year 
 using LOGISTIC REGRESSION.
 
