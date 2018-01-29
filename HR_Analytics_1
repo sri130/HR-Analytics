@@ -1,0 +1,860 @@
+
+## AIM:
+
+# The aim is to predict the employee attrition and factors effecting it
+# Understanding the employee attrition.
+
+#1.Employee General Data
+#2.Employee Survey
+#3.Manager Survey
+#4.Employee Log in Time
+#5.Employee Log out Time
+
+################################################################
+
+### Data Understanding
+
+# Install and Load the required packages
+# install.packages("MASS")
+# install.packages("car")
+# install.packages("e1071")
+# install.packages("ggplot2")
+# install.packages("caret", dependencies = c("Depends", "Suggests"))
+# install.packages("cowplot")
+# install.packages("GGally")
+# install.packages("caTools")
+# install.packages("lubridate")
+# install.packages("ModelMetrics")
+# install.packages("lattice")
+
+library(MASS)
+library(car)
+library(e1071)
+library(caret)
+library(ggplot2)
+library(cowplot)
+library(GGally)
+library(caTools)
+library(ModelMetrics)
+
+## Loading General Data
+General_Data<-read.csv("general_data.csv",stringsAsFactors = FALSE)
+## Loading Employee Survey Data
+Employee_Survey<-read.csv("employee_survey_data.csv",stringsAsFactors = FALSE)
+## Loading Manager Survey Data
+Manager_Survey<-read.csv("manager_survey_data.csv",stringsAsFactors = FALSE)
+## Loading Employee Login Time
+In_Time<-read.csv("in_time.csv",stringsAsFactors = FALSE)
+Out_Time<-read.csv("out_time.csv",stringsAsFactors = FALSE)
+
+## View Data Sets
+# View(General_Data)
+# View(Employee_Survey)
+# View(Manager_Survey)
+# View(In_Time)
+# View(Out_Time)
+
+## Structure data
+str(General_Data) # 4410 obs. of  24 variables 
+str(Employee_Survey) # 4410 obs. of  4 variables
+str(Manager_Survey) # 4410 obs. of  4 variables
+str(In_Time)  # 4410 obs. of  262 variables
+str(Out_Time) # 4410 obs. of  262 variables
+
+## Summary of Data Sets Loaded
+summary(General_Data)
+summary(Employee_Survey)
+summary(Manager_Survey)
+summary(In_Time)
+summary(Out_Time)
+
+#Calculating Number of working days from in_time dataset (Assuming x is employee id)
+In_Time$Numberofworkingdays <- 261 - apply(In_Time,1,function(x) sum(is.na(x)))
+## considering NAs as leaves , where 261 is tota no of columns - 1( employee id column)
+Employee_Workingdays <- In_Time[,c("X","Numberofworkingdays")]
+# View(Employee_Workingdays)
+
+colnames(Employee_Workingdays)[1] <-"EmployeeID"
+
+#Calculating Number of working days from out_time dataset (Assuming x is employee id)
+Out_Time$Numberofworkingdays <- 261 - apply(Out_Time,1,function(x) sum(is.na(x)))
+Employee_Workingdays_out <- Out_Time[,c("X","Numberofworkingdays")]
+# View(Employee_Workingdays_out)
+
+colnames(Employee_Workingdays_out)[1] <-"EmployeeID"
+
+#combining in_time & out_time sheets
+Emp_workingdays_main <- merge(Employee_Workingdays,Employee_Workingdays_out,by="EmployeeID")
+# View(Emp_workingdays_main)
+## checking if the no of working days are matching in both data frames (they should match)
+Emp_workingdays_main$Trueorfalse <- ifelse(Emp_workingdays_main$Numberofworkingdays.x == Emp_workingdays_main$Numberofworkingdays.y,"1","0")
+levels(Emp_workingdays_main$Trueorfalse)
+
+
+Emp_workingdays_main <- Emp_workingdays_main[,c(1:2)]
+
+#Collate files together
+length(unique(Employee_Survey$EmployeeID)) #4410 
+length(unique(Emp_workingdays_main$EmployeeID)) #4410
+length(unique(General_Data$EmployeeID)) #4410
+length(unique(Manager_Survey$EmployeeID))#4410
+
+# Validating Difference in Employee IDs 
+setdiff(General_Data$EmployeeID,Emp_workingdays_main$EmployeeID)# Identical EmployeeID across these datasets
+setdiff(General_Data$EmployeeID,Employee_Survey$EmployeeID) # Identical EmployeeID across these datasets
+setdiff(General_Data$EmployeeID,Manager_Survey$EmployeeID) # Identical EmployeeID across these datasets
+
+## Merge Employee and Manager Survey data with General Data
+HR_final <- merge(General_Data,Employee_Survey,by = "EmployeeID")
+HR_final <- merge(HR_final,Manager_Survey,by="EmployeeID")
+HR_final <- merge(HR_final,Emp_workingdays_main,by="EmployeeID")
+
+str(HR_final) #4410 obs. of  30 variables
+
+sapply(HR_final, function(x) sum(is.na(x)))
+#NumCompaniesWorked 19
+#TotalWorkingYears 9
+#EnvironmentSatisfaction 25
+#JobSatisfaction 20
+#WorkLifeBalance 38
+
+sum(is.na(HR_final)) 
+# gives 111 , so in total we have 111 null values out of 4410 values
+# 111/4410 is 0.025 , 2.5% 
+# These values can be removed because less than 5 %
+HR_final <- HR_final[!is.na(HR_final$NumCompaniesWorked),]
+HR_final <- HR_final[!is.na(HR_final$TotalWorkingYears),]
+HR_final <- HR_final[!is.na(HR_final$EnvironmentSatisfaction),]
+HR_final <- HR_final[!is.na(HR_final$JobSatisfaction),]
+HR_final <- HR_final[!is.na(HR_final$WorkLifeBalance),]
+
+anyDuplicated(HR_final) # Zero duplicate rows
+
+sum(is.na(HR_final)) # zero null values now
+
+View(HR_final) #Masterfile 
+
+################################################################
+
+### Data Preparation & Exploratory Data Analysis
+
+# Understanding the structure of the collated file
+
+
+str(HR_final) #4300 obs. of  30 variables;
+
+#Below variables are continous
+#Age,distancefromhome, MonthlyIncome, Numcompaniesworked, percentsalaryhike, 
+#standardhours, totalworkingyears,trainingtimeslastyear,yearsatcompany,
+#yearssincelastpromotion,yearswithcurrmanager,numberofworkingdays,employeecount
+
+# Below varaibles are categorical
+#Maritalstatus, Gender,jobrole,joblevel,educationfield,education, businesstravel,
+#department,EnvironmentSatisfaction, JobSatisfaction,WorkLifeBalance ,
+#JobInvolvement, PerformanceRating,RelationshipSatisfaction,Stockoptionlevel,over18
+
+bar_theme1<- theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5), 
+                   legend.position="none")
+
+plot_grid(ggplot(HR_final, aes(x=Gender,fill=Attrition))+ geom_bar(), 
+          ggplot(HR_final, aes(x=MaritalStatus,fill=Attrition))+ geom_bar()+bar_theme1,
+          ggplot(HR_final, aes(x=JobRole,fill=Attrition))+ geom_bar()+bar_theme1,
+          ggplot(HR_final, aes(x=JobLevel,fill=Attrition))+ geom_bar()+bar_theme1,
+          ggplot(HR_final, aes(x=EducationField,fill=Attrition))+ geom_bar()+bar_theme1,
+          ggplot(HR_final, aes(x=Education,fill=Attrition))+ geom_bar()+bar_theme1,
+          align = "h")
+
+
+plot_grid(ggplot(HR_final, aes(x=Department,fill=Attrition))+ geom_bar()+bar_theme1,
+          ggplot(HR_final, aes(x=EnvironmentSatisfaction,fill=Attrition))+ geom_bar()+bar_theme1,
+          ggplot(HR_final, aes(x=JobSatisfaction,fill=Attrition))+ geom_bar()+bar_theme1,
+          ggplot(HR_final, aes(x=JobInvolvement,fill=Attrition))+ geom_bar()+bar_theme1,
+          ggplot(HR_final, aes(x=WorkLifeBalance,fill=Attrition))+ geom_bar()+bar_theme1,
+          align = "h") 
+
+plot_grid(ggplot(HR_final, aes(x=PerformanceRating,fill=Attrition))+ geom_bar()+bar_theme1,
+          ggplot(HR_final, aes(x=StockOptionLevel,fill=Attrition))+ geom_bar()+bar_theme1,
+          ggplot(HR_final, aes(x=Over18,fill=Attrition))+ geom_bar()+bar_theme1,
+          align = "h")
+
+ggsave("performance.jpeg", width = 9, height = 5)
+
+# Histogram and Boxplots for numeric variables 
+box_theme<- theme(axis.line=element_blank(),axis.title=element_blank(), 
+                  axis.ticks=element_blank(), axis.text=element_blank())
+
+box_theme_y<- theme(axis.line.y=element_blank(),axis.title.y=element_blank(), 
+                    axis.ticks.y=element_blank(), axis.text.y=element_blank(),
+                    legend.position="none")
+
+plot_grid(ggplot(HR_final, aes(MonthlyIncome))+ geom_histogram(binwidth = 30),
+          ggplot(HR_final, aes(x="",y=MonthlyIncome))+ geom_boxplot(width=0.1)+coord_flip()+box_theme, 
+          align = "v",ncol = 1)
+
+ggsave("monthly_income.jpeg", width = 9, height = 5)
+
+plot_grid(ggplot(HR_final, aes(Age))+ geom_histogram(binwidth = 20),
+          ggplot(HR_final, aes(x="",y=Age))+ geom_boxplot(width=0.1)+coord_flip()+box_theme, 
+          align = "v",ncol = 1)
+
+ggsave("age.jpeg", width = 9, height = 5)
+
+plot_grid(ggplot(HR_final, aes(DistanceFromHome))+ geom_histogram(binwidth = 20),
+          ggplot(HR_final, aes(x="",y=DistanceFromHome))+ geom_boxplot(width=0.1)+coord_flip()+box_theme, 
+          align = "v",ncol = 1) 
+
+ggsave("distance_from_home.jpeg", width = 9, height = 5)
+
+plot_grid(ggplot(HR_final, aes(YearsAtCompany))+ geom_histogram(binwidth = 20),
+          ggplot(HR_final, aes(x="",y=YearsAtCompany))+ geom_boxplot(width=0.1)+coord_flip()+box_theme, 
+          align = "v",ncol = 1) 
+
+ggsave("years_at_company.jpeg", width = 9, height = 5)
+
+#plot_grid(ggplot(HR_final, aes(NumCompaniesWorked))+ geom_histogram(binwidth = 20),
+         # ggplot(HR_final, aes(x="",y=NumCompaniesWorked))+ geom_boxplot(width=0.1)+coord_flip()+box_theme, 
+          #align = "v",ncol = 1)
+
+plot_grid(ggplot(HR_final, aes(PercentSalaryHike))+ geom_histogram(binwidth = 30),
+          ggplot(HR_final, aes(x="",y=PercentSalaryHike))+ geom_boxplot(width=0.1)+coord_flip()+box_theme, 
+          align = "v",ncol = 1) 
+
+ggsave("salary_hike.jpeg", width = 9, height = 5)
+
+#plot_grid(ggplot(HR_final, aes(StandardHours))+ geom_histogram(),
+          #ggplot(HR_final, aes(x="",y=StandardHours))+ geom_boxplot(width=0.1)+coord_flip()+box_theme, 
+         # align = "v",ncol = 1) 
+
+plot_grid(ggplot(HR_final, aes(TotalWorkingYears))+ geom_histogram(binwidth = 30),
+          ggplot(HR_final, aes(x="",y=TotalWorkingYears))+ geom_boxplot(width=0.1)+coord_flip()+box_theme, 
+          align = "v",ncol = 1) 
+
+ggsave("tot_years_experience.jpeg", width = 9, height = 5)
+
+
+plot_grid(ggplot(HR_final, aes(TrainingTimesLastYear))+ geom_histogram(binwidth = 20),
+          ggplot(HR_final, aes(x="",y=TrainingTimesLastYear))+ geom_boxplot(width=0.1)+coord_flip()+box_theme, 
+          align = "v",ncol = 1) 
+
+ggsave("training.jpeg", width = 9, height = 5)
+
+plot_grid(ggplot(HR_final, aes(YearsSinceLastPromotion))+ geom_histogram(binwidth = 20),
+          ggplot(HR_final, aes(x="",y=YearsSinceLastPromotion))+ geom_boxplot(width=0.1)+coord_flip()+box_theme, 
+          align = "v",ncol = 1)
+
+ggsave("promition.jpeg", width = 9, height = 5)
+
+
+plot_grid(ggplot(HR_final, aes(EmployeeCount))+ geom_histogram(binwidth = 30),
+          ggplot(HR_final, aes(x="",y=EmployeeCount))+ geom_boxplot(width=0.1)+coord_flip()+box_theme, 
+          align = "v",ncol = 1) 
+
+plot_grid(ggplot(HR_final, aes(Numberofworkingdays))+ geom_histogram(binwidth = 30),
+          ggplot(HR_final, aes(x="",y=Numberofworkingdays))+ geom_boxplot(width=0.1)+coord_flip()+box_theme, 
+          align = "v",ncol = 1) 
+
+
+#Minimum outliers in the table
+
+# Boxplots of numeric variables relative to  status
+plot_grid(ggplot(HR_final, aes(x=Attrition,y=MonthlyIncome, fill=Attrition))+ geom_boxplot(width=0.2)+ 
+            coord_flip() +theme(legend.position="none"),
+          ggplot(HR_final, aes(x=Attrition,y=Age, fill=Attrition))+ geom_boxplot(width=0.2)+
+            coord_flip() + box_theme_y,
+          ggplot(HR_final, aes(x=Attrition,y=YearsAtCompany, fill=Attrition))+ geom_boxplot(width=0.2)+
+            coord_flip() + box_theme_y,
+          align = "v",nrow = 1)
+
+# Correlation between numeric variables
+library(GGally)
+ggpairs(HR_final[,c("MonthlyIncome","Age","DistanceFromHome","YearsAtCompany",
+                         "NumCompaniesWorked","PercentSalaryHike",
+                        "TotalWorkingYears","TrainingTimesLastYear","YearsAtCompany"
+                      )])
+
+##########################################################
+
+
+sapply(HR_final[,c("MonthlyIncome","Age","DistanceFromHome","YearsAtCompany",
+                        "NumCompaniesWorked","PercentSalaryHike",
+                        "TotalWorkingYears","TrainingTimesLastYear","YearsAtCompany"
+)], function(x) quantile(x,seq(0,1,.01),na.rm = T)) #no outlier
+
+
+
+################################################################
+############# Feature standardisation ##########
+
+HR_final$MonthlyIncome <- scale(HR_final$MonthlyIncome) 
+View(HR_final)
+str(HR_final) #4300 obs. of  30 variables
+
+# Converting Attrition : "No"=0,"Yes"=1
+
+HR_final$Attrition <-ifelse(HR_final$Attrition=="Yes",1,0)
+
+Attrition <- sum(HR_final$Attrition)/nrow(HR_final)
+Attrition #0.16 where Attrition percentage is 16%
+
+#Converting Gender Male and Female in binary format 
+HR_final$Gender <- ifelse(HR_final$Gender == "Male",1,0)
+HR_final$Over18 <- ifelse(HR_final$Over18 == "Y",1,0)
+
+attritionrate <- sum(HR_final$Attrition)/nrow(HR_final)
+attritionrate # 16.16% attrition rate. 
+
+# creating a dataframe of categorical features
+HR_final_Chr <- HR_final[,-c(1:3,6,9,10,14:18,20:24,30)]
+View(HR_final_Chr)
+str(HR_final_Chr) # 4300 obs. of  13 variables
+
+# converting categorical attributes to factor
+HR_final_fact<- data.frame(sapply(HR_final_Chr, function(x) factor(x)))
+str(HR_final_fact) #4300 obs. of  13 variables
+
+# creating dummy variables for factor attributes
+dummies<- data.frame(sapply(HR_final_fact, 
+                            function(x) data.frame(model.matrix(~x-1,data =HR_final_fact))[,-1]))
+
+str(dummies) #4300 obs. of  43 variables
+
+d2 <- HR_final[,c(3,2,6,10,14,15,17,20:24,30)]
+
+View(d2)
+
+str(d2) 
+
+# Final dataset
+
+HR_final_final<- cbind(HR_final[,c(3,2,6,10,14,15,17,20:24,30)],dummies) 
+View(HR_final_final) #4300 obs. of  56 variables
+str(HR_final_final) #4300 obs. of  56 variables
+
+########################################################################
+# splitting the data between train and test
+set.seed(100)
+
+indices = sample.split(HR_final_final$Attrition, SplitRatio = 0.7)
+
+train = HR_final_final[indices,]
+
+test = HR_final_final[!(indices),]
+
+########################################################################
+# Logistic Regression: 
+
+#Initial model
+
+model_1 = glm(Attrition ~ ., data = train, family = "binomial")
+
+summary(model_1) #AIC 2266.4....56 coeff..nullDev 2661.4.5...resDev 2154.4
+
+# Stepwise selection
+library("MASS")
+model_2<- stepAIC(model_1, direction="both")
+
+summary(model_2)
+
+
+# Removing multicollinearity through VIF check
+library(car)
+vif(model_2)
+
+model_3 <- glm(Attrition	~ Age+ DistanceFromHome+	Gender+	MonthlyIncome+
+               NumCompaniesWorked+	PercentSalaryHike+	TotalWorkingYears+	
+              TrainingTimesLastYear+	YearsAtCompany+	YearsSinceLastPromotion+	
+              YearsWithCurrManager+	Numberofworkingdays.x+	BusinessTravel.xTravel_Frequently+
+                BusinessTravel.xTravel_Rarely+	Department.xResearch...Development+	
+                Department.xSales+	Education.x2+	Education.x3+	Education.x4+	Education.x5+
+                EducationField.xLife.Sciences+ EducationField.xMarketing+ EducationField.xMedical+	EducationField.xOther+ EducationField.xTechnical.Degree+	                JobLevel.x2+	JobLevel.x3+	JobLevel.x4+	
+                JobLevel.x5+	JobRole.xHuman.Resources+	JobRole.xLaboratory.Technician+	JobRole.xManager+	
+                JobRole.xManufacturing.Director+	JobRole.xResearch.Director+	JobRole.xResearch.Scientist+	
+                JobRole.xSales.Executive+	JobRole.xSales.Representative+	MaritalStatus.xMarried+	
+                MaritalStatus.xSingle+	StockOptionLevel.x1+	StockOptionLevel.x2+	StockOptionLevel.x3+
+                EnvironmentSatisfaction.x2+	EnvironmentSatisfaction.x3+	EnvironmentSatisfaction.x4+
+                JobSatisfaction.x2+	JobSatisfaction.x3+	JobSatisfaction.x4+	WorkLifeBalance.x2+
+                WorkLifeBalance.x3+	WorkLifeBalance.x4+	JobInvolvement.x2+	JobInvolvement.x3+
+                JobInvolvement.x4+	PerformanceRating, family = "binomial", data = train) 
+
+summary(model_3)
+vif(model_3)
+
+model_4 <- glm(Attrition	~ Age+ DistanceFromHome+	Gender+	MonthlyIncome+
+                 NumCompaniesWorked+	PercentSalaryHike+	TotalWorkingYears+	
+                 TrainingTimesLastYear+	YearsAtCompany+	YearsSinceLastPromotion+	
+                 YearsWithCurrManager+	Numberofworkingdays.x+	BusinessTravel.xTravel_Frequently+
+                 BusinessTravel.xTravel_Rarely+	Department.xResearch...Development+	
+                 Department.xSales+	Education.x2+	Education.x3+	Education.x4+	Education.x5+
+                 EducationField.xLife.Sciences+ EducationField.xMarketing+ EducationField.xMedical+	EducationField.xOther+ EducationField.xTechnical.Degree+	                JobLevel.x2+	JobLevel.x3+	JobLevel.x4+	
+                 JobLevel.x5+	JobRole.xHuman.Resources+	JobRole.xLaboratory.Technician+	JobRole.xManager+	
+                 JobRole.xManufacturing.Director+	JobRole.xResearch.Director+	JobRole.xResearch.Scientist+	
+                 JobRole.xSales.Executive+	JobRole.xSales.Representative+	MaritalStatus.xMarried+	
+                 MaritalStatus.xSingle+	StockOptionLevel.x1+	StockOptionLevel.x2+	StockOptionLevel.x3+
+                 EnvironmentSatisfaction.x2+	EnvironmentSatisfaction.x3+	EnvironmentSatisfaction.x4+
+                 JobSatisfaction.x2+	JobSatisfaction.x3+	JobSatisfaction.x4+	WorkLifeBalance.x2+
+                 WorkLifeBalance.x3+	WorkLifeBalance.x4+
+               	JobInvolvement.x3+JobInvolvement.x4 +	PerformanceRating, family = "binomial", data = train) 
+
+summary(model_4)
+vif(model_4)
+
+
+model_5 <- glm(Attrition	~ Age+ DistanceFromHome+	Gender+	MonthlyIncome+
+                 NumCompaniesWorked+	PercentSalaryHike+	TotalWorkingYears+	
+                 TrainingTimesLastYear+	YearsAtCompany+	YearsSinceLastPromotion+	
+                 YearsWithCurrManager+	Numberofworkingdays.x+	BusinessTravel.xTravel_Frequently+
+                 BusinessTravel.xTravel_Rarely+	Department.xResearch...Development+	
+                 Department.xSales+	Education.x2+	Education.x3+	Education.x4+	Education.x5+
+                  EducationField.xMarketing+ EducationField.xMedical+	EducationField.xOther+ EducationField.xTechnical.Degree+	                JobLevel.x2+	JobLevel.x3+	JobLevel.x4+	
+                 JobLevel.x5+	JobRole.xHuman.Resources+	JobRole.xLaboratory.Technician+	JobRole.xManager+	
+                 JobRole.xManufacturing.Director+	JobRole.xResearch.Director+	JobRole.xResearch.Scientist+	
+                 JobRole.xSales.Executive+	JobRole.xSales.Representative+	MaritalStatus.xMarried+	
+                 MaritalStatus.xSingle+	StockOptionLevel.x1+	StockOptionLevel.x2+	StockOptionLevel.x3+
+                 EnvironmentSatisfaction.x2+	EnvironmentSatisfaction.x3+	EnvironmentSatisfaction.x4+
+                 JobSatisfaction.x2+	JobSatisfaction.x3+	JobSatisfaction.x4+	WorkLifeBalance.x2+
+                 WorkLifeBalance.x3+	WorkLifeBalance.x4+
+                 JobInvolvement.x3+JobInvolvement.x4 +	PerformanceRating, family = "binomial", data = train) 
+summary(model_5)
+vif(model_5)
+
+model_6 <- glm(Attrition	~ Age+ DistanceFromHome+	Gender+	MonthlyIncome+
+                 NumCompaniesWorked+	PercentSalaryHike+	TotalWorkingYears+	
+                 TrainingTimesLastYear+		YearsSinceLastPromotion+	
+                 YearsWithCurrManager+	Numberofworkingdays.x+	BusinessTravel.xTravel_Frequently+
+                 BusinessTravel.xTravel_Rarely+	Department.xResearch...Development+	
+                 Department.xSales+	Education.x2+	Education.x3+	Education.x4+	Education.x5+
+                 EducationField.xMarketing+ EducationField.xMedical+	EducationField.xOther+ EducationField.xTechnical.Degree+	                JobLevel.x2+	JobLevel.x3+	JobLevel.x4+	
+                 JobLevel.x5+	JobRole.xHuman.Resources+	JobRole.xLaboratory.Technician+	JobRole.xManager+	
+                 JobRole.xManufacturing.Director+	JobRole.xResearch.Director+	JobRole.xResearch.Scientist+	
+                 JobRole.xSales.Executive+	JobRole.xSales.Representative+	MaritalStatus.xMarried+	
+                 MaritalStatus.xSingle+	StockOptionLevel.x1+	StockOptionLevel.x2+	StockOptionLevel.x3+
+                 EnvironmentSatisfaction.x2+	EnvironmentSatisfaction.x3+	EnvironmentSatisfaction.x4+
+                 JobSatisfaction.x2+	JobSatisfaction.x3+	JobSatisfaction.x4+	WorkLifeBalance.x2+
+                 WorkLifeBalance.x3+	WorkLifeBalance.x4+
+                 JobInvolvement.x3+JobInvolvement.x4 +	PerformanceRating, family = "binomial", data = train) 
+summary(model_6)
+vif(model_6)
+
+model_7 <-  glm(Attrition	~ Age+ DistanceFromHome+	Gender+	MonthlyIncome+
+                  NumCompaniesWorked+	PercentSalaryHike+	TotalWorkingYears+	
+                  TrainingTimesLastYear+		YearsSinceLastPromotion+	
+                  YearsWithCurrManager+	Numberofworkingdays.x+	BusinessTravel.xTravel_Frequently+
+                  BusinessTravel.xTravel_Rarely+	Department.xResearch...Development+	
+                  Education.x2+	Education.x3+	Education.x4+	Education.x5+
+                  EducationField.xMarketing+ EducationField.xMedical+	EducationField.xOther+ EducationField.xTechnical.Degree+	                JobLevel.x2+	JobLevel.x3+	JobLevel.x4+	
+                  JobLevel.x5+	JobRole.xHuman.Resources+	JobRole.xLaboratory.Technician+	JobRole.xManager+	
+                  JobRole.xManufacturing.Director+	JobRole.xResearch.Director+	JobRole.xResearch.Scientist+	
+                  JobRole.xSales.Executive+	JobRole.xSales.Representative+	MaritalStatus.xMarried+	
+                  MaritalStatus.xSingle+	StockOptionLevel.x1+	StockOptionLevel.x2+	StockOptionLevel.x3+
+                  EnvironmentSatisfaction.x2+	EnvironmentSatisfaction.x3+	EnvironmentSatisfaction.x4+
+                  JobSatisfaction.x2+	JobSatisfaction.x3+	JobSatisfaction.x4+	WorkLifeBalance.x2+
+                  WorkLifeBalance.x3+	WorkLifeBalance.x4+
+                  JobInvolvement.x3+JobInvolvement.x4 +	PerformanceRating, family = "binomial", data = train) 
+summary(model_7)
+vif(model_7)
+
+model_8 <-  glm(Attrition	~ Age+ DistanceFromHome+	Gender+	MonthlyIncome+
+                  NumCompaniesWorked+	PercentSalaryHike+	TotalWorkingYears+	
+                  TrainingTimesLastYear+		YearsSinceLastPromotion+	
+                  YearsWithCurrManager+	Numberofworkingdays.x+	BusinessTravel.xTravel_Frequently+
+                  BusinessTravel.xTravel_Rarely+	Department.xResearch...Development+	
+                  Education.x3+	Education.x4+	Education.x5+
+                  EducationField.xMarketing+ EducationField.xMedical+	EducationField.xOther+ EducationField.xTechnical.Degree+	                JobLevel.x2+	JobLevel.x3+	JobLevel.x4+	
+                  JobLevel.x5+	JobRole.xHuman.Resources+	JobRole.xLaboratory.Technician+	JobRole.xManager+	
+                  JobRole.xManufacturing.Director+	JobRole.xResearch.Director+	JobRole.xResearch.Scientist+	
+                  JobRole.xSales.Executive+	JobRole.xSales.Representative+	MaritalStatus.xMarried+	
+                  MaritalStatus.xSingle+	StockOptionLevel.x1+	StockOptionLevel.x2+	StockOptionLevel.x3+
+                  EnvironmentSatisfaction.x2+	EnvironmentSatisfaction.x3+	EnvironmentSatisfaction.x4+
+                  JobSatisfaction.x2+	JobSatisfaction.x3+	JobSatisfaction.x4+	WorkLifeBalance.x2+
+                  WorkLifeBalance.x3+	WorkLifeBalance.x4+
+                  JobInvolvement.x3+JobInvolvement.x4 +	PerformanceRating, family = "binomial", data = train) 
+summary(model_8)
+vif(model_8)
+
+model_9 <-  glm(Attrition	~ Age+ DistanceFromHome+	Gender+	MonthlyIncome+
+                  NumCompaniesWorked+	PercentSalaryHike+	TotalWorkingYears+	
+                  TrainingTimesLastYear+		YearsSinceLastPromotion+	
+                  YearsWithCurrManager+	Numberofworkingdays.x+	BusinessTravel.xTravel_Frequently+
+                  BusinessTravel.xTravel_Rarely+	Department.xResearch...Development+	
+                  Education.x3+	Education.x4+	Education.x5+
+                  EducationField.xMarketing+ EducationField.xMedical+	EducationField.xOther+ EducationField.xTechnical.Degree+	                JobLevel.x2+	JobLevel.x3+	JobLevel.x4+	
+                  JobLevel.x5+	JobRole.xHuman.Resources+	JobRole.xLaboratory.Technician+	JobRole.xManager+	
+                  JobRole.xManufacturing.Director+	JobRole.xResearch.Director+	JobRole.xResearch.Scientist+	
+                  JobRole.xSales.Executive+	MaritalStatus.xMarried+	
+                  MaritalStatus.xSingle+	StockOptionLevel.x1+	StockOptionLevel.x2+	StockOptionLevel.x3+
+                  EnvironmentSatisfaction.x2+	EnvironmentSatisfaction.x3+	EnvironmentSatisfaction.x4+
+                  JobSatisfaction.x2+	JobSatisfaction.x3+	JobSatisfaction.x4+	WorkLifeBalance.x2+
+                  WorkLifeBalance.x3+	WorkLifeBalance.x4+
+                  JobInvolvement.x3+JobInvolvement.x4 +	PerformanceRating, family = "binomial", data = train) 
+summary(model_9)
+vif(model_9)
+
+
+model_10 <-  glm(Attrition	~ Age+ DistanceFromHome+	Gender+	MonthlyIncome+
+                  NumCompaniesWorked+	PercentSalaryHike+	TotalWorkingYears+	
+                  TrainingTimesLastYear+		YearsSinceLastPromotion+	
+                  YearsWithCurrManager+	Numberofworkingdays.x+	BusinessTravel.xTravel_Frequently+
+                  BusinessTravel.xTravel_Rarely+	Department.xResearch...Development+	
+                  Education.x3+	Education.x4+	Education.x5+
+                  EducationField.xMarketing+ EducationField.xMedical+	EducationField.xOther+ EducationField.xTechnical.Degree+	                JobLevel.x2+	JobLevel.x3+	JobLevel.x4+	
+                  JobLevel.x5+	JobRole.xHuman.Resources+	JobRole.xLaboratory.Technician+	JobRole.xManager+	
+                  JobRole.xManufacturing.Director+	JobRole.xResearch.Director+	JobRole.xResearch.Scientist+	
+                  JobRole.xSales.Executive+	
+                  MaritalStatus.xSingle+	StockOptionLevel.x1+	StockOptionLevel.x2+	StockOptionLevel.x3+
+                  EnvironmentSatisfaction.x2+	EnvironmentSatisfaction.x3+	EnvironmentSatisfaction.x4+
+                  JobSatisfaction.x2+	JobSatisfaction.x3+	JobSatisfaction.x4+	WorkLifeBalance.x2+
+                  WorkLifeBalance.x3+	WorkLifeBalance.x4+
+                  JobInvolvement.x3+JobInvolvement.x4 +	PerformanceRating, family = "binomial", data = train) 
+summary(model_10)
+vif(model_10)
+
+
+
+model_11 <-  glm(Attrition	~ Age+ DistanceFromHome+	Gender+	MonthlyIncome+
+                   NumCompaniesWorked+	PercentSalaryHike+	TotalWorkingYears+	
+                   TrainingTimesLastYear+		YearsSinceLastPromotion+	
+                   YearsWithCurrManager+	Numberofworkingdays.x+	BusinessTravel.xTravel_Frequently+
+                   BusinessTravel.xTravel_Rarely+	Department.xResearch...Development+	
+                   Education.x3+	Education.x4+	Education.x5+
+                   EducationField.xMarketing+ EducationField.xMedical+	EducationField.xOther+ EducationField.xTechnical.Degree+	                JobLevel.x2+	JobLevel.x3+	JobLevel.x4+	
+                   JobLevel.x5+	JobRole.xHuman.Resources+	JobRole.xLaboratory.Technician+	JobRole.xManager+	
+                   JobRole.xManufacturing.Director+	JobRole.xResearch.Director+	JobRole.xResearch.Scientist+	
+                   JobRole.xSales.Executive+	
+                   MaritalStatus.xSingle+	StockOptionLevel.x1+	StockOptionLevel.x2+	StockOptionLevel.x3+
+                   EnvironmentSatisfaction.x2+	EnvironmentSatisfaction.x3+	EnvironmentSatisfaction.x4+
+                   JobSatisfaction.x2+	JobSatisfaction.x3+	JobSatisfaction.x4+	WorkLifeBalance.x2+
+                   WorkLifeBalance.x3+	WorkLifeBalance.x4+
+                   	PerformanceRating, family = "binomial", data = train) 
+summary(model_11)
+vif(model_11)
+
+model_12 <-  glm(Attrition	~ Age+ DistanceFromHome+	Gender+	MonthlyIncome+
+                   NumCompaniesWorked+	PercentSalaryHike+	TotalWorkingYears+	
+                   TrainingTimesLastYear+		YearsSinceLastPromotion+	
+                   YearsWithCurrManager+	Numberofworkingdays.x+	BusinessTravel.xTravel_Frequently+
+                   BusinessTravel.xTravel_Rarely+	Department.xResearch...Development+	
+                   Education.x3+	Education.x4+	Education.x5+
+                   EducationField.xMarketing+ EducationField.xMedical+	EducationField.xOther+ EducationField.xTechnical.Degree+
+                   	JobRole.xHuman.Resources+	JobRole.xLaboratory.Technician+	JobRole.xManager+	
+                   JobRole.xManufacturing.Director+	JobRole.xResearch.Director+	JobRole.xResearch.Scientist+	
+                   JobRole.xSales.Executive+	
+                   MaritalStatus.xSingle+	StockOptionLevel.x1+	StockOptionLevel.x2+	StockOptionLevel.x3+
+                   EnvironmentSatisfaction.x2+	EnvironmentSatisfaction.x3+	EnvironmentSatisfaction.x4+
+                   JobSatisfaction.x2+	JobSatisfaction.x3+	JobSatisfaction.x4+	WorkLifeBalance.x2+
+                   WorkLifeBalance.x3+	WorkLifeBalance.x4+
+                   PerformanceRating, family = "binomial", data = train) 
+summary(model_12)
+vif(model_12)
+
+
+model_13 <-  glm(Attrition	~ Age+ DistanceFromHome+	Gender+	MonthlyIncome+
+                   NumCompaniesWorked+	PercentSalaryHike+	TotalWorkingYears+	
+                   TrainingTimesLastYear+		YearsSinceLastPromotion+	
+                   YearsWithCurrManager+	Numberofworkingdays.x+	BusinessTravel.xTravel_Frequently+
+                   BusinessTravel.xTravel_Rarely+	Department.xResearch...Development+	
+                   Education.x3+	Education.x4+	Education.x5+
+                   JobRole.xHuman.Resources+	JobRole.xLaboratory.Technician+	JobRole.xManager+	
+                   JobRole.xManufacturing.Director+	JobRole.xResearch.Director+	JobRole.xResearch.Scientist+	
+                   JobRole.xSales.Executive+	
+                   MaritalStatus.xSingle+	StockOptionLevel.x1+	StockOptionLevel.x2+	StockOptionLevel.x3+
+                   EnvironmentSatisfaction.x2+	EnvironmentSatisfaction.x3+	EnvironmentSatisfaction.x4+
+                   JobSatisfaction.x2+	JobSatisfaction.x3+	JobSatisfaction.x4+	WorkLifeBalance.x2+
+                   WorkLifeBalance.x3+	WorkLifeBalance.x4+
+                   PerformanceRating, family = "binomial", data = train) 
+summary(model_13)
+vif(model_13)
+
+
+
+model_14 <-  glm(Attrition	~ Age+ DistanceFromHome+	Gender+	MonthlyIncome+
+                   NumCompaniesWorked+	PercentSalaryHike+	TotalWorkingYears+	
+                   TrainingTimesLastYear+		YearsSinceLastPromotion+	
+                   YearsWithCurrManager+	Numberofworkingdays.x+	BusinessTravel.xTravel_Frequently+
+                   BusinessTravel.xTravel_Rarely+
+                   Education.x3+	Education.x4+	Education.x5+
+                   JobRole.xHuman.Resources+	JobRole.xLaboratory.Technician+	JobRole.xManager+	
+                   JobRole.xManufacturing.Director+	JobRole.xResearch.Director+	JobRole.xResearch.Scientist+	
+                   JobRole.xSales.Executive+	
+                   MaritalStatus.xSingle+	StockOptionLevel.x1+	StockOptionLevel.x2+	StockOptionLevel.x3+
+                   EnvironmentSatisfaction.x2+	EnvironmentSatisfaction.x3+	EnvironmentSatisfaction.x4+
+                   JobSatisfaction.x2+	JobSatisfaction.x3+	JobSatisfaction.x4+	WorkLifeBalance.x2+
+                   WorkLifeBalance.x3+	WorkLifeBalance.x4+
+                   PerformanceRating, family = "binomial", data = train) 
+summary(model_14)
+vif(model_14)
+
+
+
+model_15 <-  glm(Attrition	~ Age+ DistanceFromHome+	Gender+	MonthlyIncome+
+                   NumCompaniesWorked+	PercentSalaryHike+	TotalWorkingYears+	
+                   TrainingTimesLastYear+		YearsSinceLastPromotion+	
+                   YearsWithCurrManager+	Numberofworkingdays.x+	BusinessTravel.xTravel_Frequently+
+                   BusinessTravel.xTravel_Rarely+
+                   Education.x3+	Education.x4+	Education.x5+
+                   JobRole.xHuman.Resources+	JobRole.xLaboratory.Technician+	JobRole.xManager+	
+                   JobRole.xManufacturing.Director+	JobRole.xResearch.Director+	JobRole.xResearch.Scientist+	
+                   JobRole.xSales.Executive+	
+                   MaritalStatus.xSingle+
+                   EnvironmentSatisfaction.x2+	EnvironmentSatisfaction.x3+	EnvironmentSatisfaction.x4+
+                   JobSatisfaction.x2+	JobSatisfaction.x3+	JobSatisfaction.x4+	WorkLifeBalance.x2+
+                   WorkLifeBalance.x3+	WorkLifeBalance.x4+
+                   PerformanceRating, family = "binomial", data = train) 
+summary(model_15)
+vif(model_15)
+
+model_16 <-  glm(Attrition	~ Age+ DistanceFromHome+	MonthlyIncome+
+                   NumCompaniesWorked+	PercentSalaryHike+	TotalWorkingYears+	
+                   TrainingTimesLastYear+		YearsSinceLastPromotion+	
+                   YearsWithCurrManager+	Numberofworkingdays.x+	BusinessTravel.xTravel_Frequently+
+                   BusinessTravel.xTravel_Rarely+
+                   Education.x3+	Education.x4+	Education.x5+
+                   JobRole.xHuman.Resources+	JobRole.xLaboratory.Technician+	JobRole.xManager+	
+                   JobRole.xManufacturing.Director+	JobRole.xResearch.Director+	JobRole.xResearch.Scientist+	
+                   JobRole.xSales.Executive+	
+                   MaritalStatus.xSingle+
+                   EnvironmentSatisfaction.x2+	EnvironmentSatisfaction.x3+	EnvironmentSatisfaction.x4+
+                   JobSatisfaction.x2+	JobSatisfaction.x3+	JobSatisfaction.x4+	WorkLifeBalance.x2+
+                   WorkLifeBalance.x3+	WorkLifeBalance.x4+
+                   PerformanceRating, family = "binomial", data = train) 
+summary(model_16)
+vif(model_16)
+
+model_17 <-  glm(Attrition	~ Age+ 	MonthlyIncome+
+                   NumCompaniesWorked+	PercentSalaryHike+	TotalWorkingYears+	
+                   TrainingTimesLastYear+		YearsSinceLastPromotion+	
+                   YearsWithCurrManager+	Numberofworkingdays.x+	BusinessTravel.xTravel_Frequently+
+                   BusinessTravel.xTravel_Rarely+
+                   Education.x3+	Education.x4+	Education.x5+
+                   JobRole.xHuman.Resources+	JobRole.xLaboratory.Technician+	JobRole.xManager+	
+                   JobRole.xManufacturing.Director+	JobRole.xResearch.Director+	JobRole.xResearch.Scientist+	
+                   JobRole.xSales.Executive+	
+                   MaritalStatus.xSingle+
+                   EnvironmentSatisfaction.x2+	EnvironmentSatisfaction.x3+	EnvironmentSatisfaction.x4+
+                   JobSatisfaction.x2+	JobSatisfaction.x3+	JobSatisfaction.x4+	WorkLifeBalance.x2+
+                   WorkLifeBalance.x3+	WorkLifeBalance.x4+
+                   PerformanceRating, family = "binomial", data = train) 
+summary(model_17)
+vif(model_17)
+
+model_18 <-  glm(Attrition	~ Age+	MonthlyIncome+
+                   NumCompaniesWorked+	TotalWorkingYears+	
+                   TrainingTimesLastYear+		YearsSinceLastPromotion+	
+                   YearsWithCurrManager+	Numberofworkingdays.x+	BusinessTravel.xTravel_Frequently+
+                   BusinessTravel.xTravel_Rarely+
+                   Education.x3+	Education.x4+	Education.x5+
+                   JobRole.xHuman.Resources+	JobRole.xLaboratory.Technician+	JobRole.xManager+	
+                   JobRole.xManufacturing.Director+	JobRole.xResearch.Director+	JobRole.xResearch.Scientist+	
+                   JobRole.xSales.Executive+	
+                   MaritalStatus.xSingle+
+                   EnvironmentSatisfaction.x2+	EnvironmentSatisfaction.x3+	EnvironmentSatisfaction.x4+
+                   JobSatisfaction.x2+	JobSatisfaction.x3+	JobSatisfaction.x4+	WorkLifeBalance.x2+
+                   WorkLifeBalance.x3+	WorkLifeBalance.x4+
+                   PerformanceRating, family = "binomial", data = train) 
+summary(model_18)
+vif(model_18)
+
+
+model_19 <-  glm(Attrition	~ Age+	MonthlyIncome+
+                   NumCompaniesWorked+	TotalWorkingYears+	
+                   TrainingTimesLastYear+		YearsSinceLastPromotion+	
+                   YearsWithCurrManager+	Numberofworkingdays.x+	BusinessTravel.xTravel_Frequently+
+                   BusinessTravel.xTravel_Rarely+
+                   Education.x3+	Education.x4+	Education.x5+
+                   JobRole.xHuman.Resources+	
+                   JobRole.xManufacturing.Director+	JobRole.xResearch.Director+	JobRole.xResearch.Scientist+	
+                   JobRole.xSales.Executive+	
+                   MaritalStatus.xSingle+
+                   EnvironmentSatisfaction.x2+	EnvironmentSatisfaction.x3+	EnvironmentSatisfaction.x4+
+                   JobSatisfaction.x2+	JobSatisfaction.x3+	JobSatisfaction.x4+	WorkLifeBalance.x2+
+                   WorkLifeBalance.x3+	WorkLifeBalance.x4+
+                   PerformanceRating, family = "binomial", data = train) 
+summary(model_19)
+vif(model_19)
+
+
+model_20 <-  glm(Attrition	~ Age+	MonthlyIncome+
+                   NumCompaniesWorked+	TotalWorkingYears+	
+                   TrainingTimesLastYear+		YearsSinceLastPromotion+	
+                   YearsWithCurrManager+	Numberofworkingdays.x+	BusinessTravel.xTravel_Frequently+
+                   BusinessTravel.xTravel_Rarely+
+              
+                   JobRole.xManufacturing.Director+	JobRole.xResearch.Director+	JobRole.xResearch.Scientist+	
+                   JobRole.xSales.Executive+	
+                   MaritalStatus.xSingle+
+                   EnvironmentSatisfaction.x2+	EnvironmentSatisfaction.x3+	EnvironmentSatisfaction.x4+
+                   JobSatisfaction.x2+	JobSatisfaction.x3+	JobSatisfaction.x4+	WorkLifeBalance.x2+
+                   WorkLifeBalance.x3+	WorkLifeBalance.x4+
+                   PerformanceRating, family = "binomial", data = train) 
+summary(model_20)
+vif(model_20)
+
+
+model_21 <-  glm(Attrition	~ Age+
+                   NumCompaniesWorked+	TotalWorkingYears+	
+                   TrainingTimesLastYear+		YearsSinceLastPromotion+	
+                   YearsWithCurrManager+	Numberofworkingdays.x+	BusinessTravel.xTravel_Frequently+
+                   BusinessTravel.xTravel_Rarely+
+                   JobRole.xManufacturing.Director+	JobRole.xResearch.Director+	JobRole.xResearch.Scientist+	
+                   JobRole.xSales.Executive+	
+                   MaritalStatus.xSingle+
+                   EnvironmentSatisfaction.x2+	EnvironmentSatisfaction.x3+	EnvironmentSatisfaction.x4+
+                   JobSatisfaction.x2+	JobSatisfaction.x3+	JobSatisfaction.x4+	WorkLifeBalance.x2+
+                   WorkLifeBalance.x3+	WorkLifeBalance.x4+
+                   PerformanceRating, family = "binomial", data = train) 
+summary(model_21)
+vif(model_21)
+
+
+final_model <- model_21
+
+#######################################################################
+
+### Model Evaluation
+
+### Test Data ####
+
+#predicted probabilities for test data
+
+test_pred = predict(final_model, type = "response", 
+                    newdata = test[,-1])
+
+
+# Let's see the summary 
+
+summary(test_pred)
+
+test$prob <- test_pred
+View(test)
+# Let's use the probability cutoff of 50%.
+
+test_pred_attrition <- factor(ifelse(test_pred >= 0.50, "Yes", "No"))
+test_actual_attrition <- factor(ifelse(test$Attrition==1,"Yes","No"))
+
+table(test_actual_attrition,test_pred_attrition)
+
+#######################################################################
+test_pred_attrition <- factor(ifelse(test_pred >= 0.375, "Yes", "No"))
+
+install.packages("e1071")
+library(e1071)
+
+install.packages("caret")
+library(caret)
+
+test_conf<- confusionMatrix(test_pred_attrition, test_actual_attrition, positive = "Yes")
+test_conf
+
+##########################################################################
+
+# Find cut off value 
+# Lets find out the optimal probability cut off
+
+perform_fn <- function(cutoff) 
+{
+  predicted_attrition <- factor(ifelse(test_pred >= cutoff, "Yes", "No"))
+  conf <- confusionMatrix(predicted_attrition, test_actual_pred, positive = "Yes")
+  acc <- conf$overall[1]
+  sens <- conf$byClass[1]
+  spec <- conf$byClass[2]
+  out <- t(as.matrix(c(sens, spec, acc))) 
+  colnames(out) <- c("sensitivity", "specificity", "accuracy")
+  return(out)
+}
+
+
+# Creating cutoff values from 0.003575 to 0.812100 for plotting and initiallizing a matrix of 100 X 3.
+
+# Summary of test probability
+
+
+
+summary(test_pred)
+s = seq(.01,.80,length=100)
+OUT = matrix(0,100,3)
+
+for(i in 1:100)
+{
+  OUT[i,] = perform_fn(s[i])
+} 
+
+plot(s, OUT[,1],xlab="Cutoff",ylab="Value",cex.lab=1.5,cex.axis=1.5,ylim=c(0,1),type="l",lwd=2,axes=FALSE,col=2)
+axis(1,seq(0,1,length=5),seq(0,1,length=5),cex.lab=1.5)
+axis(2,seq(0,1,length=5),seq(0,1,length=5),cex.lab=1.5)
+lines(s,OUT[,2],col="darkgreen",lwd=2)
+lines(s,OUT[,3],col=4,lwd=2)
+box()
+legend(0,.50,col=c(2,"darkgreen",4,"darkred"),lwd=c(2,2,2,2),c("Sensitivity","Specificity","Accuracy"))
+
+cutoff <- s[which(abs(OUT[,1]-OUT[,2])<0.01)]
+
+# Let's choose a cutoff value of 0.3132 for final model
+
+test_cutoff_attrition <- factor(ifelse(test_pred >=0.3132, "Yes", "No"))
+
+conf_final <- confusionMatrix(test_cutoff_attrition, test_actual_attrition, positive = "Yes")
+
+acc <- conf_final$overall[1]
+
+sens <- conf_final$byClass[1]
+
+spec <- conf_final$byClass[2]
+
+acc
+
+sens
+
+spec
+
+View(test)
+
+
+############### KS -statistic - Test Data #####################
+
+test_cutoff_attrition <- ifelse(test_cutoff_attrition=="Yes",1,0)
+test_actual_attrition <- ifelse(test_actual_attrition=="Yes",1,0)
+
+
+library(ROCR)
+#on testing  data
+
+pred_object_test<- prediction(test_cutoff_attrition, test_actual_attrition)
+
+performance_measures_test<- performance(pred_object_test, "tpr", "fpr")
+
+ks_table_test <- attr(performance_measures_test, "y.values")[[1]] - 
+  (attr(performance_measures_test, "x.values")[[1]])
+
+max(ks_table_test)
+
+
+####################################################################
+# Lift & Gain Chart 
+
+# plotting the lift chart
+
+# Loading dplyr package 
+
+require(dplyr)
+library(dplyr)
+
+lift <- function(labels , predicted_prob,groups=10) {
+  
+  if(is.factor(labels)) labels  <- as.integer(as.character(labels ))
+  if(is.factor(predicted_prob)) predicted_prob <- as.integer(as.character(predicted_prob))
+  helper = data.frame(cbind(labels , predicted_prob))
+  helper[,"bucket"] = ntile(-helper[,"predicted_prob"], groups)
+  gaintable = helper %>% group_by(bucket)  %>%
+    summarise_at(vars(labels ), funs(total = n(),
+                                     totalresp=sum(., na.rm = TRUE))) %>%
+    
+    mutate(Cumresp = cumsum(totalresp),
+           Gain=Cumresp/sum(totalresp)*100,
+           Cumlift=Gain/(bucket*(100/groups))) 
+  return(gaintable)
+}
+
+attrition_decile = lift(test_actual_attrition, test_pred, groups = 10)
+attrition_decile
+
+
+
